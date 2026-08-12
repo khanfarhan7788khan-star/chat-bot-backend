@@ -2,15 +2,12 @@ const path = require("path");
 const fs = require("fs");
 const initSqlJs = require("sql.js");
 
-// Vercel/serverless: use /tmp when DB_PATH isn't provided.
-// NOTE: /tmp is NOT persistent storage on Vercel.
 const DB_PATH = process.env.DB_PATH
   ? path.resolve(process.env.DB_PATH)
   : path.join("/tmp", "chat.db");
 
 const dbDir = path.dirname(DB_PATH);
 
-// Create database directory if necessary
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
@@ -33,13 +30,18 @@ let SQL = null;
 let db = null;
 let ready = null;
 
-/**
- * Persist the in-memory SQLite database to disk.
- */
+function getWasmPath() {
+  return path.join(
+    process.cwd(),
+    "node_modules",
+    "sql.js",
+    "dist",
+    "sql-wasm.wasm"
+  );
+}
+
 function persist() {
-  if (!db) {
-    return;
-  }
+  if (!db) return;
 
   const data = db.export();
 
@@ -49,9 +51,6 @@ function persist() {
   );
 }
 
-/**
- * Initialize SQLite.
- */
 async function init() {
   if (ready) {
     return ready;
@@ -59,20 +58,17 @@ async function init() {
 
   ready = (async () => {
     try {
-      // Explicitly point sql.js to the WASM file.
-      const wasmPath = path.join(
-        process.cwd(),
-        "node_modules",
-        "sql.js",
-        "dist",
-        "sql-wasm.wasm"
+      const wasmPath = getWasmPath();
+
+      console.log("sql.js WASM path:", wasmPath);
+      console.log(
+        "sql.js WASM exists:",
+        fs.existsSync(wasmPath)
       );
 
-      // Helpful error if Vercel didn't bundle the WASM file.
       if (!fs.existsSync(wasmPath)) {
         throw new Error(
-          `sql-wasm.wasm was not found at: ${wasmPath}. ` +
-          `Make sure sql.js is in dependencies and the WASM file is included in the Vercel deployment.`
+          `sql-wasm.wasm is missing from the deployment: ${wasmPath}`
         );
       }
 
@@ -80,7 +76,6 @@ async function init() {
         locateFile: () => wasmPath,
       });
 
-      // Load existing database if available.
       if (fs.existsSync(DB_PATH)) {
         const fileBuffer = fs.readFileSync(DB_PATH);
 
@@ -89,17 +84,17 @@ async function init() {
         db = new SQL.Database();
       }
 
-      // Create tables/indexes.
       db.run(SCHEMA);
 
-      // Save initial database.
       persist();
 
-      console.log(`SQLite database initialized: ${DB_PATH}`);
+      console.log("Database initialized successfully.");
     } catch (error) {
-      console.error("Failed to initialize database:", error);
+      console.error(
+        "Failed to initialize database:",
+        error
+      );
 
-      // Allow another initialization attempt if this one fails.
       ready = null;
 
       throw error;
@@ -109,9 +104,6 @@ async function init() {
   return ready;
 }
 
-/**
- * Run INSERT / UPDATE / DELETE / other SQL statements.
- */
 function run(sql, params = []) {
   if (!db) {
     throw new Error(
@@ -124,9 +116,6 @@ function run(sql, params = []) {
   persist();
 }
 
-/**
- * Run SELECT query and return rows.
- */
 function all(sql, params = []) {
   if (!db) {
     throw new Error(
